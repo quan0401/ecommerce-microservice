@@ -1,5 +1,5 @@
 import 'express-async-errors';
-import { IEmailMessageDetails, IMessageDetails, winstonLogger } from '@quan0401/ecommerce-shared';
+import { winstonLogger } from '@quan0401/ecommerce-shared';
 import { config } from '~/config';
 import http from 'http';
 import { Application } from 'express';

@@ -78,7 +78,8 @@ services:
       network.host: 0.0.0.0
       transport.host: 127.0.0.1
       http.host: 0.0.0.0
-      xpack.security.enabled: "false"
+      # xpack.security.enabled: "false"
+      xpack.security.enabled: "true"
       xpack.security.authc.api_key.enabled: "true"
       xpack.monitoring.collection.enabled: "true"
       xpack.security.enrollment.enabled: "true"
@@ -98,12 +99,81 @@ services:
     restart: always
     environment:
       - ELASTICSEARCH_HOSTS=["http://elasticsearch_container:9200"]
+
+      # have to run the curl command first : curl -s -X POST -u elastic:admin1234 -H "Content-Type: application/json" http://localhost:9200/_security/user/kibana_system/_password -d "{\"password\":\"kibana\"}"
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=kibana
+      # and and run: bin/elasticsearch-service-tokens create elastic/kibana ecommerce-kibana
+      - ELASTICSEARCH_SERVICEACCOUNT_TOKEN=AAEAAWVsYXN0aWMva2liYW5hL2Vjb21tZXJjZS1raWJhbmE6SWE0M0dlMmhTT2E1ZXBKbkU1Q2x2UQ
+      - XPACK_FLEET_AGENTS_ELASTICSEARCH_HOSTS=["http://elasticsearch_container:9200"]
+
     ports:
       - 5601:5601
     networks:
       - elastic
     volumes:
       - ./kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    depends_on:
+      - elasticsearch
+
+  apmServer:
+    image: docker.elastic.co/apm/apm-server:8.11.0
+    container_name: apm_server_container
+    ports:
+      - 8200:8200
+    volumes:
+      - ./apm-server.yml:/usr/share/apm-server/apm-server.yml:ro
+    networks:
+      - elastic
+    command: >
+      apm-server -e
+        -E apm-server.rum.enabled=true
+        -E setup.kibana.host=kibana_container:5601
+        -E setup.template.settings.index.number_of_replicas=0
+        -E apm-server.kibana.enabled=true
+        -E apm-server.kibana.host=kibana_container:5601
+        -E apm-server.kibana.protocol=http
+        -E strict.perms=false
+        -E apm-server.auth.anonymous.enabled=true
+    # anonymous true so the ELASTIC_APM_SECRET_TOKEN is always empty
+
+  metricbeat:
+    container_name: metricbeat_container
+    image: docker.elastic.co/beats/metricbeat:8.11.0
+    restart: always
+    # so that metricbeat can read docker socket
+    user: root
+    ports:
+      - 5066:5066
+    networks:
+      - elastic
+    volumes:
+      - ./metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro
+      # docker module
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # system module
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /proc:/hostfs/proc:ro
+      - /:/hostfs:ro
+    # This command to allow metric to get information from system
+    command: ["--strict.perms=false", "-system.hostfs=/hostfs"]
+    depends_on:
+      - elasticsearch
+
+  heartbeat:
+    container_name: heartbeat_container
+    image: docker.elastic.co/beats/heartbeat:8.11.0
+    restart: always
+    # so that metricbeat can read docker socket
+    user: root
+    hostname: heartbeat
+    cap_add:
+      - NET_RAW
+    networks:
+      - elastic
+    command: ["--strict.perms=false"]
+    volumes:
+      - ./heartbeat.yml:/usr/share/heartbeat/heartbeat.yml:ro
     depends_on:
       - elasticsearch
 
@@ -169,7 +239,6 @@ services:
       - SENDER_EMAIL_PASSWORD=9gygFNxsZYEwv4zeSN
       # - ELASTIC_SEARCH_URL=http://elastic:admin1234@elasticsearch_container:9200 # work
       - ELASTIC_SEARCH_URL=http://elastic:admin1234@host.docker.internal:9200 # work
-
       - ELASTIC_APM_SERVER_URL=http://localhost:8200
       - ELASTIC_APM_SECRET_TOKEN=
     networks:

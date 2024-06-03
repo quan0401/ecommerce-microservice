@@ -32,6 +32,7 @@
     "pino-pretty": "^11.0.0",
     "shelljs": "^0.8.5",
     "tsc": "^2.0.4",
+    "elastic-apm-node": "^4.1.0",
     "typescript": "^5.4.3",
     "typescript-transform-paths": "^3.4.7",
     "winston": "^3.13.0"
