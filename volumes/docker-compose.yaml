@@ -10,6 +10,8 @@ services:
     # Persistent data
     volumes:
       - ./docker-volumes/cache:/data
+    networks:
+      - elastic
 
   mongodb:
     container_name: mongodb_container
@@ -17,8 +19,8 @@ services:
     restart: always
     networks:
       - elastic
-    ports:
-      - 27017:27017
+    # ports:
+    #   - 27017:27017
     volumes:
       - ./docker-volumes/data:/data/db
 
@@ -34,10 +36,10 @@ services:
       MYSQL_USER: ecommerce
       MYSQL_DATABASE: ecommerce_auth
       MYSQL_PASSWORD: api
-    ports:
-      - 3306:3306
     volumes:
       - ./docker-volumes/mysql:/var/lib/mysql
+    networks:
+      - elastic
 
   postgres:
     container_name: postgres_container
@@ -47,10 +49,12 @@ services:
       POSTGRES_PASSWORD: api
       POSTGRES_USER: ecommerce
       POSTGRES_DB: ecommerce_reviews
-    ports:
-      - 5432:5432
+    # ports:
+    #   - 5432:5432
     volumes:
       - ./docker-volumes/postgres:/var/lib/postgresql
+    networks:
+      - elastic
 
   rabbitmq:
     container_name: rabbitmq_container
@@ -103,7 +107,7 @@ services:
       # have to run the curl command first : curl -s -X POST -u elastic:admin1234 -H "Content-Type: application/json" http://localhost:9200/_security/user/kibana_system/_password -d "{\"password\":\"kibana\"}"
       - ELASTICSEARCH_USERNAME=kibana_system
       - ELASTICSEARCH_PASSWORD=kibana
-      # and and run: bin/elasticsearch-service-tokens create elastic/kibana ecommerce-kibana
+      # and run: bin/elasticsearch-service-tokens create elastic/kibana ecommerce-kibana
       - ELASTICSEARCH_SERVICEACCOUNT_TOKEN=AAEAAWVsYXN0aWMva2liYW5hL2Vjb21tZXJjZS1raWJhbmE6SWE0M0dlMmhTT2E1ZXBKbkU1Q2x2UQ
       - XPACK_FLEET_AGENTS_ELASTICSEARCH_HOSTS=["http://elasticsearch_container:9200"]
 
@@ -115,6 +119,7 @@ services:
       - ./kibana.yml:/usr/share/kibana/config/kibana.yml:ro
     depends_on:
       - elasticsearch
+      - rabbitmq
 
   apmServer:
     image: docker.elastic.co/apm/apm-server:8.11.0
@@ -159,6 +164,8 @@ services:
     command: ["--strict.perms=false", "-system.hostfs=/hostfs"]
     depends_on:
       - elasticsearch
+      - kibana
+      - rabbitmq
 
   heartbeat:
     container_name: heartbeat_container
@@ -176,20 +183,21 @@ services:
       - ./heartbeat.yml:/usr/share/heartbeat/heartbeat.yml:ro
     depends_on:
       - elasticsearch
+      - kibana
+      - rabbitmq
 
   gateway:
+    image: quan0401/ecommerce-gateway:latest
     container_name: gateway_container
     build:
       context: ../server/1-gateway-service
       dockerfile: Dockerfile.dev
     restart: always
-    # extra_hosts:
-    #   - "host.docker.internal:host-gateway"
     ports:
       - 4000:4000
     env_file: ../server/1-gateway-service/.env
     environment:
-      - ENABLE_APM=1
+      - ENABLE_APM=0
       - GATEWAY_JWT_TOKEN=1282722b942e08c8a6cb033aa6ce850e
       - JWT_TOKEN=8db8f85991bb28f45ac0107f2a1b349c
       - NODE_ENV=development
@@ -201,37 +209,39 @@ services:
       # - USERS_BASE_URL=http://localhost:4003
       - USERS_BASE_URL=http://host.docker.internal:4003
       - GIG_BASE_URL=http://host.docker.internal:4004
-      - MESSAGE_BASE_URL=http://localhost:4005
-      - ORDER_BASE_URL=http://localhost:4006
-      - REVIEW_BASE_URL=http://localhost:4007
+      - MESSAGE_BASE_URL=http://host.docker.internal:4005
+      - ORDER_BASE_URL=http://host.docker.internal:4006
+      - REVIEW_BASE_URL=http://host.docker.internal:4007
       - REDIS_HOST=redis://host.docker.internal:6379
-      # - ELASTIC_SEARCH_URL=http://elastic:admin1234@elasticsearch_container:9200 # work
+      - ELASTIC_SEARCH_URL=http://elastic:admin1234@elasticsearch_container:9200 # work
       # - ELASTIC_SEARCH_URL=http://elastic:admin1234@host.docker.internal:9200
       # - ELASTIC_SEARCH_URL=http://host.docker.internal:9200 # work
 
-      - ELASTIC_SEARCH_URL=http://elastic:admin1234@host.docker.internal:9200 # work
-      - ELASTIC_APM_SERVER_URL=http://localhost:8200
+      # - ELASTIC_SEARCH_URL=http://elastic:admin1234@host.docker.internal:9200 # work
+      # - ELASTIC_APM_SERVER_URL=http://localhost:8200 # work
+      - ELASTIC_APM_SERVER_URL=http://host.docker.internal:8200
       - ELASTIC_APM_SECRET_TOKEN=
     networks:
       - elastic
     depends_on:
       - elasticsearch
+      - kibana
+      - rabbitmq
       - redis
-
   notifications:
+    image: quan0401/ecommerce-notifications:latest
     container_name: notifications_container
     build:
       context: ../server/2-notification-service
       dockerfile: Dockerfile.dev
     restart: always
-
     ports:
       - 4001:4001
     env_file: ../server/2-notification-service/.env
     environment:
-      - ENABLE_APM=1
+      - ENABLE_APM=0
       - NODE_ENV=development
-      - CLIENT_URL=http://localhost:3000
+      - CLIENT_URL=http://host.docker.internal:3000
       # - RABBITMQ_ENDPOINT=amqp://ecommerce:api@localhost:5672
       # - RABBITMQ_ENDPOINT=amqp://ecommerce:api@rabbitmq_container:5672
       - RABBITMQ_ENDPOINT=amqp://ecommerce:api@host.docker.internal:5672
@@ -239,46 +249,49 @@ services:
       - SENDER_EMAIL_PASSWORD=9gygFNxsZYEwv4zeSN
       # - ELASTIC_SEARCH_URL=http://elastic:admin1234@elasticsearch_container:9200 # work
       - ELASTIC_SEARCH_URL=http://elastic:admin1234@host.docker.internal:9200 # work
-      - ELASTIC_APM_SERVER_URL=http://localhost:8200
+      # - ELASTIC_APM_SERVER_URL=http://localhost:8200 # work
+      - ELASTIC_APM_SERVER_URL=http://host.docker.internal:8200
       - ELASTIC_APM_SECRET_TOKEN=
     networks:
       - elastic
     depends_on:
       - elasticsearch
-
+      - kibana
+      - rabbitmq
   auth:
+    image: quan0401/ecommerce-auth:latest
     container_name: auth_container
     build:
       context: ../server/3-auth-service
       dockerfile: Dockerfile.dev
     restart: always
-
     ports:
       - 4002:4002
     env_file: ../server/3-auth-service/.env
     environment:
-      - ENABLE_APM=1
+      - ENABLE_APM=0
       - GATEWAY_JWT_TOKEN=1282722b942e08c8a6cb033aa6ce850e
       - JWT_TOKEN=8db8f85991bb28f45ac0107f2a1b349c
       - NODE_ENV=development
-      - AP_GATEWAY_URL=http://localhost:4000
-      - CLIENT_URL=http://localhost:3000
+      - AP_GATEWAY_URL=http://host.docker.internal:4000
       - RABBITMQ_ENDPOINT=amqp://ecommerce:api@host.docker.internal:5672
-      - MYSQL_DB=mysql://ecommerce:api@host.docker.internal:3306/ecommerce_auth
+      - MYSQL_DB=mysql://ecommerce:api@mysql_container:3306/ecommerce_auth
       - CLOUD_NAME=dg3fsapzu
       - CLOUD_API_KEY=799483692214735
       - CLOUD_API_SECRET=3E0VN2YkCVyMjlBWUmQ7zOdkoB0
       - CLOUD_FOLDER=ecommerce
-      - ELASTIC_SEARCH_URL=http://elastic:admin1234@host.docker.internal:9200
-      - ELASTIC_APM_SERVER_URL=http://localhost:8200
+      - ELASTIC_SEARCH_URL=http://elastic:admin1234@elasticsearch_container:9200
+      - ELASTIC_APM_SERVER_URL=http://host.docker.internal:8200
       - ELASTIC_APM_SECRET_TOKEN=
     networks:
       - elastic
     depends_on:
       - elasticsearch
+      - kibana
+      - rabbitmq
       - mysql
-
   user:
+    image: quan0401/ecommerce-user:latest
     container_name: user_container
     build:
       context: ../server/4-users-service
@@ -288,12 +301,12 @@ services:
       - 4003:4003
     env_file: ../server/4-users-service/.env
     environment:
-      - ENABLE_APM=1
+      - ENABLE_APM=0
       - DATABASE_URL=mongodb://mongodb:27017/ecommerce-users
       - GATEWAY_JWT_TOKEN=1282722b942e08c8a6cb033aa6ce850e
       - JWT_TOKEN=8db8f85991bb28f45ac0107f2a1b349c
       - NODE_ENV=development
-      - AP_GATEWAY_URL=http://localhost:4000
+      - AP_GATEWAY_URL=http://host.docker.internal:4000
       # - RABBITMQ_ENDPOINT=amqp://ecommerce:api@localhost:5672
       # - MYSQL_DB=mysql://ecommerce:api@localhost:3306/ecommerce_auth
       - RABBITMQ_ENDPOINT=amqp://ecommerce:api@host.docker.internal:5672
@@ -304,16 +317,18 @@ services:
       - CLOUD_FOLDER=ecommerce
       - REDIS_HOST=redis://host.docker.internal:6379
       # - ELASTIC_SEARCH_URL=http://elastic:admin1234@localhost:9200
-      - ELASTIC_SEARCH_URL=http://elastic:admin1234@host.docker.internal:9200
-      - ELASTIC_APM_SERVER_URL=http://localhost:8200
+      - ELASTIC_SEARCH_URL=http://elastic:admin1234@elasticsearch_container:9200
+      - ELASTIC_APM_SERVER_URL=http://host.docker.internal:8200
       - ELASTIC_APM_SECRET_TOKEN=
     networks:
       - elastic
     depends_on:
       - elasticsearch
+      - kibana
+      - rabbitmq
       - mongodb
-
   gig:
+    image: quan0401/ecommerce-gig:latest
     container_name: gig_container
     build:
       context: ../server/5-gig-service
@@ -328,23 +343,126 @@ services:
       - GATEWAY_JWT_TOKEN=1282722b942e08c8a6cb033aa6ce850e
       - JWT_TOKEN=8db8f85991bb28f45ac0107f2a1b349c
       - NODE_ENV=development
-      - AP_GATEWAY_URL=http://localhost:4000
+      - AP_GATEWAY_URL=http://host.docker.internal:4000
       - RABBITMQ_ENDPOINT=amqp://ecommerce:api@host.docker.internal:5672
       - CLOUD_NAME=dg3fsapzu
       - CLOUD_API_KEY=799483692214735
       - CLOUD_API_SECRET=3E0VN2YkCVyMjlBWUmQ7zOdkoB0
       - CLOUD_FOLDER=ecommerce
       - REDIS_HOST=redis://host.docker.internal:6379
-      - ELASTIC_SEARCH_URL=http://elastic:admin1234@host.docker.internal:9200
-      - ELASTIC_APM_SERVER_URL=http://localhost:8200
+      - ELASTIC_SEARCH_URL=http://elastic:admin1234@elasticsearch_container:9200
+      - ELASTIC_APM_SERVER_URL=http://host.docker.internal:8200
       - ELASTIC_APM_SECRET_TOKEN=
-
     networks:
       - elastic
     depends_on:
       - elasticsearch
+      - kibana
+      - rabbitmq
       - mongodb
-      - redis
+  chat:
+    image: quan0401/ecommerce-chat:latest
+    container_name: chat_container
+    build:
+      context: ../server/6-chat-service
+      dockerfile: Dockerfile.dev
+    restart: always
+    ports:
+      - 4005:4005
+    env_file: ../server/6-chat-service/.env
+    environment:
+      - ENABLE_APM=0
+      - DATABASE_URL=mongodb://mongodb_container:27017/ecommerce-chat
+      - GATEWAY_JWT_TOKEN=1282722b942e08c8a6cb033aa6ce850e
+      - JWT_TOKEN=8db8f85991bb28f45ac0107f2a1b349c
+      - NODE_ENV=development
+      - AP_GATEWAY_URL=http://host.docker.internal:4000
+      - RABBITMQ_ENDPOINT=amqp://ecommerce:api@host.docker.internal:5672
+      - CLOUD_NAME=dg3fsapzu
+      - CLOUD_API_KEY=799483692214735
+      - CLOUD_API_SECRET=3E0VN2YkCVyMjlBWUmQ7zOdkoB0
+      - CLOUD_FOLDER=ecommerce
+      - REDIS_HOST=redis://localhost:6379
+      - ELASTIC_SEARCH_URL=http://elastic:admin1234@elasticsearch_container:9200
+      - ELASTIC_APM_SERVER_URL=http://host.docker.internal:8200
+      - ELASTIC_APM_SECRET_TOKEN=
+    networks:
+      - elastic
+    depends_on:
+      - elasticsearch
+      - kibana
+      - rabbitmq
+      - mongodb
+  order:
+    image: quan0401/ecommerce-order:latest
+    container_name: order_container
+    build:
+      context: ../server/7-order-service
+      dockerfile: Dockerfile.dev
+    restart: always
+    ports:
+      - 4006:4006
+    env_file: ../server/7-order-service/.env
+    environment:
+      - ENABLE_APM=0
+      - DATABASE_URL=mongodb://mongodb_container:27017/ecommerce-order
+      - GATEWAY_JWT_TOKEN=1282722b942e08c8a6cb033aa6ce850e
+      - JWT_TOKEN=8db8f85991bb28f45ac0107f2a1b349c
+      - NODE_ENV=development
+      - AP_GATEWAY_URL=http://host.docker.internal:4000
+      - RABBITMQ_ENDPOINT=amqp://ecommerce:api@host.docker.internal:5672
+      - CLOUD_NAME=dg3fsapzu
+      - CLOUD_API_KEY=799483692214735
+      - CLOUD_API_SECRET=3E0VN2YkCVyMjlBWUmQ7zOdkoB0
+      - CLOUD_FOLDER=ecommerce
+      - REDIS_HOST=redis://localhost:6379
+      - STRIPE_API_KEY=sk_test_51J3ZQvK5
+      - ELASTIC_SEARCH_URL=http://elastic:admin1234@elasticsearch_container:9200
+      - ELASTIC_APM_SERVER_URL=http://host.docker.internal:8200
+      - ELASTIC_APM_SECRET_TOKEN=
+    networks:
+      - elastic
+    depends_on:
+      - elasticsearch
+      - kibana
+      - rabbitmq
+      - mongodb
+  review:
+    image: quan0401/ecommerce-review:latest
+    container_name: review_container
+    build:
+      context: ../server/8-review-service
+      dockerfile: Dockerfile.dev
+    restart: always
+    ports:
+      - 4007:4007
+    env_file: ../server/8-review-service/.env
+    environment:
+      - ENABLE_APM=0
+      - DATABASE_HOST=postgres_container
+      - DATABASE_USER=ecommerce
+      - DATABASE_PASSWORD=api
+      - DATABASE_NAME=ecommerce_reviews
+      - GATEWAY_JWT_TOKEN=1282722b942e08c8a6cb033aa6ce850e
+      - JWT_TOKEN=8db8f85991bb28f45ac0107f2a1b349c
+      - NODE_ENV=development
+      - AP_GATEWAY_URL=http://host.docker.internal:4000
+      - RABBITMQ_ENDPOINT=amqp://ecommerce:api@host.docker.internal:5672
+      - CLOUD_NAME=dg3fsapzu
+      - CLOUD_API_KEY=799483692214735
+      - CLOUD_API_SECRET=3E0VN2YkCVyMjlBWUmQ7zOdkoB0
+      - CLOUD_FOLDER=ecommerce
+      - REDIS_HOST=redis://localhost:6379
+      - ELASTIC_SEARCH_URL=http://elastic:admin1234@elasticsearch_container:9200
+      - ELASTIC_APM_SERVER_URL=http://host.docker.internal:8200
+      - ELASTIC_APM_SECRET_TOKEN=
+    networks:
+      - elastic
+    depends_on:
+      - elasticsearch
+      - kibana
+      - rabbitmq
+      - postgres
 
 networks:
   elastic:
